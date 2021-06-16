@@ -1,0 +1,22 @@
+{
+  "name": "@hns-dev/bsdoc",
+  "version": "1.0.0",
+  "description": "vendorded flattened jsdoc",
+  "main": "jsdoc",
+  "bin": {
+    "jsdoc": "jsdoc"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pinheadmz/bsdoc.git"
+  },
+  "author": "Matthew Zipkin",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/pinheadmz/bsdoc/issues"
+  },
+  "homepage": "https://github.com/pinheadmz/bsdoc#readme"
+}
