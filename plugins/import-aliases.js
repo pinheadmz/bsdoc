@@ -27,27 +27,45 @@ const fileinfoByFile = new Map();
  * Is not the best, but should be good enough.
  */
 
-const typedefRegex = /\/\*\*\s*?@typedef\s+\{import\(['"]([^'"]+)['"]\)*(?:\.(\w+))*\}\s+(\w+)\s*?\*\//g
+
+function getFileInfo(filename, getNew = false) {
+  let fileinfo = fileinfoByFile.get(filename);
+
+  if (!getNew) {
+    return fileinfo;
+  }
+
+  if (fileinfo) {
+    return fileinfo;
+  }
+
+  fileinfo = new FileInfo(filename);
+  fileinfoByFile.set(filename, fileinfo);
+
+  return fileinfo;
+}
 
 /**
- * Collect all import requests from the files and clean up import requests.
- * JSDOC Event handler.
+ * Collect all `typedef imports` for a file
+ * NOTE: It may modify e.source.
+ * @param {JSDOCEvent} e
  */
 
-function beforeParse(e) {
+function typedefImportAliases(e) {
   const filename = e.filename;
+  const typedefRegex = /\/\*\*\s*?@typedef\s+\{import\(['"]([^'"]+)['"]\)*((?:\.\w+)*)\}\s+(\w+)\s*?\*\//g;
   const matchAll = [...e.source.matchAll(typedefRegex)];
 
-  if (matchAll.length === 0)
+  if (matchAll.length === 0) {
     return;
+  }
 
-  const fileinfo = fileinfoByFile.get(filename) || new FileInfo(e.filename);
-  fileinfoByFile.set(filename, fileinfo);
+  const fileinfo = getFileInfo(filename, true);
 
   for (const matched of matchAll) {
     const dir = path.dirname(filename);
     const file = withExt(path.resolve(dir, matched[1]));
-    const exported = matched[2];
+    const exported = matched[2].slice(1);
     const localAlias = matched[3];
 
     // these will need resolving.
@@ -57,15 +75,90 @@ function beforeParse(e) {
   e.source = e.source.replace(typedefRegex, '');
 }
 
+/**
+ * Parse and resolve const .. = require aliases.
+ */
+
+function constSimpleRequireAliases(e) {
+  const filename = e.filename;
+
+  const simpleRequire = /const\s+(\w+)\s*=\s*require\(['"]([^'"]+)['"]\)((?:\.\w+)*)\s*?;/g
+  const simpleRequireAll = [...e.source.matchAll(simpleRequire)]
+
+  if (simpleRequireAll.length === 0) {
+    return;
+  }
+
+  const fileinfo = getFileInfo(filename, true);
+
+  for (const matched of simpleRequireAll) {
+    const dir = path.dirname(filename);
+    const file = withExt(path.resolve(dir, matched[2]));
+    const exported = matched[3].slice(1);
+    const localAlias = matched[1];
+
+    fileinfo.localImportAliases.set(localAlias, [file, exported]);
+  }
+}
+
+/**
+ * Parse and resolve const { .. } = require aliases.
+ */
+
+function constDestructRequireAliases(e) {
+  const filename = e.filename;
+
+  const destructRequire = /const\s+\{([^{}]+)\}\s*=\s*require\(['"]([^'"]+)['"]\)((?:\.\w+)*)\s*?;/g
+  const matchedAll = e.source.matchAll(destructRequire);
+  const destructRequireAll = [...matchedAll]
+
+  if (destructRequireAll.length === 0) {
+    return;
+  }
+
+  const fileinfo = getFileInfo(filename, true);
+
+  for (const matched of destructRequireAll) {
+    const dir = path.dirname(filename);
+    const file = withExt(path.resolve(dir, matched[2]));
+    const exported = matched[3].slice(1);
+
+    const exportedNames = matched[1].split(',').map(name => name.trim());
+
+    for (const name of exportedNames) {
+      const fullexport = exported ? exported + '.' + name : name;
+
+      const localAlias = name;
+      fileinfo.localImportAliases.set(localAlias, [file, fullexport]);
+    }
+  }
+}
+
+/**
+ * Collect all import requests from the files and clean up import requests.
+ * JSDOC Event handler.
+ */
+
+function beforeParse(e) {
+  typedefImportAliases(e);
+  constSimpleRequireAliases(e);
+  constDestructRequireAliases(e);
+}
+
 
 function indexLongnames(fileinfo, doclet) {
-  const {kind, name, longname} = doclet;
+  const {kind, name, longname, meta} = doclet;
 
-  if (kind !== 'class' && kind !== 'function')
+  if (kind !== 'class' && kind !== 'function') {
     return;
+  }
 
-  if (name !== longname)
+  const codename = meta.code.name;
+
+  if (name !== longname) {
+    fileinfo.longnamesByDeclaration.set(codename, longname);
     fileinfo.longnamesByDeclaration.set(name, longname);
+  }
 }
 
 /**
@@ -77,11 +170,13 @@ function indexLongnames(fileinfo, doclet) {
 function indexMappings(fileinfo, doclet) {
   const {kind, meta} = doclet;
 
-  if (kind === 'class' || kind === 'function')
+  if (kind === 'class' || kind === 'function') {
     return;
+  }
 
-  if (meta.code.type !== 'Identifier')
+  if (meta.code.type !== 'Identifier') {
     return;
+  }
 
   fileinfo.mappings.set(meta.code.name, meta.code.value);
 }
@@ -97,11 +192,11 @@ function newDoclet(e) {
   const {meta, scope} = doclet;
   const filename = path.resolve(meta.path, meta.filename);
 
-  if (scope !== 'global' && scope !== 'static')
+  if (scope !== 'global' && scope !== 'static') {
     return;
+  }
 
-  const fileinfo = fileinfoByFile.get(filename) || new FileInfo(filename);
-  fileinfoByFile.set(filename, fileinfo);
+  const fileinfo = getFileInfo(filename, true);
 
   indexLongnames(fileinfo, doclet);
   indexMappings(fileinfo, doclet);
@@ -121,25 +216,29 @@ function indexExports(fileinfo) {
     exportsAlias = moduleExports;
     const longname = fileinfo.longnamesByDeclaration.get(exportsAlias);
 
-    if (longname)
+    if (longname) {
       fileinfo.exports.set('*', longname);
+    }
   }
 
   for (const [key, value] of fileinfo.mappings.entries()) {
-    if (value === 'exports')
+    if (value === 'exports') {
       exportsAlias = key;
+    }
   }
 
   for (const [key, value] of fileinfo.mappings.entries()) {
-    if (typeof key !== 'string')
+    if (typeof key !== 'string') {
       continue;
+    }
 
     if (key.startsWith(`${exportsAlias}.`)) {
       const exportKey = key.slice(exportsAlias.length + 1);
       const longname = fileinfo.longnamesByDeclaration.get(value);
 
-      if (longname)
+      if (longname) {
         fileinfo.exports.set(exportKey, longname);
+      }
     }
   }
 }
@@ -156,7 +255,7 @@ function resolveImports(fileinfo) {
     return;
 
   for (const [name, request] of importAliases) {
-    const importFrom = fileinfoByFile.get(request[0]);
+    const importFrom = getFileInfo(request[0]);
 
     if (!importFrom) {
       importAliases.set(name, null);
@@ -183,39 +282,75 @@ function resolveImports(fileinfo) {
 function modifyDoclet(doclet) {
   const {meta} = doclet;
 
-  if (!meta)
+  if (!meta) {
     return;
+  }
 
   const filename = path.resolve(meta.path, meta.filename);
-  const fileinfo = fileinfoByFile.get(filename);
+  const fileinfo = getFileInfo(filename);
 
-  if (!fileinfo)
+  if (!fileinfo) {
     return;
+  }
 
   const aliases = fileinfo.localImportAliases;
-  const replaceType = (type) => {
-    if (!type)
+  const localNames = fileinfo.longnamesByDeclaration;
+
+  const replaceTypes = (name) => {
+    const typeMatch = /([\w\s,]+)(?:.<(.*)>)?$/;
+    const match = name.match(typeMatch);
+
+    if (!match) {
+      throw new Error('WHAT?', name);
+    }
+
+    let actual = match[1].split(',').map(t => t.trim());
+    const extra = match[2];
+
+    actual = actual.map((t) => {
+      if (localNames.has(t))
+        return localNames.get(t);
+
+      if (aliases.has(t))
+        return aliases.get(t);
+
+      return t;
+    });
+
+    actual = actual.join(', ');
+
+    if (!extra) {
+      return actual;
+    }
+
+    return `${actual}.<${replaceTypes(extra)}>`;
+  };
+
+  const replaceAllTypes = (type) => {
+    if (!type) {
       return;
+    }
 
     for (const [index, name] of type.names.entries()) {
-      if (aliases.has(name))
-        type.names[index] = aliases.get(name);
+      type.names[index] = replaceTypes(name);
     }
   };
 
   if (doclet.properties) {
-    for (const property of doclet.properties)
-      replaceType(property.type);
+    for (const property of doclet.properties) {
+      replaceAllTypes(property.type);
+    }
   }
 
   if (doclet.params) {
-    for (const param of doclet.params)
-      replaceType(param.type);
+    for (const param of doclet.params) {
+      replaceAllTypes(param.type);
+    }
   }
 
   if (doclet.returns) {
     for (const returns of doclet.returns) {
-      replaceType(returns.type)
+      replaceAllTypes(returns.type)
     }
   }
 }
@@ -229,17 +364,20 @@ function modifyDoclet(doclet) {
 function processingComplete(e) {
   // finally try to reindex exports.
   // before we try to inject them as the imported aliases.
-  for (const info of fileinfoByFile.values())
+  for (const info of fileinfoByFile.values()) {
     indexExports(info);
+  }
 
   // Now resolve imports
-  for (const info of fileinfoByFile.values())
+  for (const info of fileinfoByFile.values()) {
     resolveImports(info);
+  }
 
   const {doclets} = e;
 
-  for (const doclet of e.doclets)
+  for (const doclet of doclets) {
     modifyDoclet(doclet);
+  }
 
   // disable generation for now.
   // e.doclets.length = 0;
@@ -250,8 +388,9 @@ function processingComplete(e) {
  */
 
 function withExt(file) {
-  if (file.endsWith('.js'))
+  if (file.endsWith('.js')) {
     return file;
+  }
 
   return file + '.js';
 }
