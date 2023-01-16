@@ -336,6 +336,12 @@ function modifyDoclet(doclet) {
     }
   };
 
+  if (doclet.augments) {
+    for (const [index, name] of doclet.augments.entries()) {
+      doclet.augments[index] = replaceTypes(name);
+    }
+  }
+
   if (doclet.properties) {
     for (const property of doclet.properties) {
       replaceAllTypes(property.type);
