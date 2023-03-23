@@ -301,7 +301,7 @@ function modifyDoclet(doclet) {
     const match = name.match(typeMatch);
 
     if (!match) {
-      throw new Error('WHAT?', name);
+      throw new Error(`Error parsing ${meta.filename}:${meta.lineno}.`);
     }
 
     let actual = match[1].split(',').map(t => t.trim());
