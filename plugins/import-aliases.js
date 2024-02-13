@@ -297,8 +297,15 @@ function modifyDoclet(doclet) {
   const localNames = fileinfo.longnamesByDeclaration;
 
   const replaceTypes = (name) => {
-    const typeMatch = /([\w\s,]+)(?:.<(.*)>)?$/;
-    const match = name.match(typeMatch);
+    const typeRegex = /([\w\s,]+)(?:.<(.*)>)?$/;
+    const match = name.match(typeRegex);
+    const unionRegex = /^\(([^|]+(?:\|[^|]+)+)\)$/;
+    const unionMatch = name.match(unionRegex);
+
+    if (unionMatch) {
+      const types = unionMatch[1].split('|').map(t => t.trim());
+      return `(${types.map(t => replaceTypes(t)).join('|')})`;
+    }
 
     if (!match) {
       throw new Error(`Error parsing ${meta.filename}:${meta.lineno}.`);
@@ -308,11 +315,13 @@ function modifyDoclet(doclet) {
     const extra = match[2];
 
     actual = actual.map((t) => {
-      if (localNames.has(t))
-        return localNames.get(t);
+      if (localNames.has(t)) {
+        return localNames.get(t) || t;
+      }
 
-      if (aliases.has(t))
-        return aliases.get(t);
+      if (aliases.has(t)) {
+        return aliases.get(t) || t;
+      }
 
       return t;
     });
