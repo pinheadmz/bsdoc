@@ -1,4 +1,6 @@
 /*!
+ * Parts of this file is based on the work of SoftwareBrothers.co
+ *
  * Copyright 2019 SoftwareBrothers.co
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +26,10 @@
 
 exports.handlers = {
   beforeParse: function(e) {
-    e.source = e.source.replace(/\/\*\*\s*?@typedef\s*?{\s*?import.*\*\//g, '')
+    // remove @typdefs with imports.
+    e.source = e.source.replace(/\/\*\*\s*?@typedef\s*?{\s*?import.*\*\//g, '');
+
+    // remove ReturnType<> aliases.
+    e.source = e.source.replace(/\/\*\*\s*?@typedef\s*?{\s*ReturnType<.*\*\//g, '');
   }
 }
